@@ -1,3 +1,5 @@
 codex-rs/app-server-protocol/schema/** linguist-generated
 codex-rs/hooks/schema/generated/** linguist-generated
 *.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

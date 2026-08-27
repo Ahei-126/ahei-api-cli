@@ -56,9 +56,14 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
+          set -euo pipefail
+          echo "event.base=[${{ github.event.inputs.newapi_base_url }}]"
+          echo "event.product=[${{ github.event.inputs.product_name }}]"
           export NEWAPI_BASE_URL="${{ github.event.inputs.newapi_base_url }}"
           export NEWAPI_PRODUCT_NAME="${{ github.event.inputs.product_name }}"
-          ./scripts/build_cnapi_packages.sh "${{ matrix.target }}"
+          echo "==> invoking bash wrapper (avoids exec-bit requirement)"
+          bash ./scripts/build_cnapi_packages.sh "${{ matrix.target }}"
+          echo "==> build_cnapi_packages.sh exited with rc=$?"
 
       - uses: actions/upload-artifact@v4
         with:
