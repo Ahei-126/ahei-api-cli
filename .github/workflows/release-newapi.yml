@@ -44,7 +44,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build and archive (Windows)
-        if: matrix.is_windows == 'true'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           .\scripts\build_cnapi_packages.ps1 `
@@ -53,7 +53,7 @@ jobs:
             -Targets ${{ matrix.target }}
 
       - name: Build and archive (macOS)
-        if: matrix.is_windows == 'false'
+        if: runner.os == 'macOS'
         shell: bash
         run: |
           export NEWAPI_BASE_URL="${{ github.event.inputs.newapi_base_url }}"
