@@ -404,7 +404,7 @@ impl NewApiClient {
         let url = format!("{base_url}/api/user/login");
         let response = self
             .http
-            .post(&url)
+            .post(url.as_str())
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({ "username": username, "password": password }))
             .send()
@@ -425,7 +425,7 @@ impl NewApiClient {
         let url = format!("{base_url}/api/token/?p=1&size=100");
         let response = self
             .http
-            .get(&url)
+            .get(url.as_str())
             .bearer_auth(user_token)
             .header("New-Api-User", user_id.to_string())
             .send()
@@ -446,7 +446,7 @@ impl NewApiClient {
         let url = format!("{base_url}/api/token/");
         let response = self
             .http
-            .post(&url)
+            .post(url.as_str())
             .bearer_auth(user_token)
             .header("New-Api-User", user_id.to_string())
             .header("Content-Type", "application/json")
@@ -476,35 +476,28 @@ async fn parse_envelope<T: for<'de> Deserialize<'de>>(
         .text()
         .await
         .map_err(|err| format!("Failed to read {context} response: {err}"))?;
-    let envelope: NewApiEnvelope<T> = serde_json::from_str(&body)
+    let envelope: serde_json::Value = serde_json::from_str(&body)
         .map_err(|err| format!("Failed to parse {context} response: {err}"))?;
-    envelope.into_data(context)
-}
-
-/// Standard New API success/error envelope.
-#[derive(Debug, Deserialize)]
-struct NewApiEnvelope<T> {
-    #[serde(default)]
-    success: bool,
-    #[serde(default)]
-    message: Option<String>,
-    #[serde(default)]
-    data: Option<T>,
-}
-
-impl<T> NewApiEnvelope<T> {
-    fn into_data(self, context: &str) -> Result<T, String> {
-        if !self.success {
-            let message = self
-                .message
-                .filter(|message| !message.is_empty())
-                .unwrap_or_else(|| format!("{context} request failed"));
-            return Err(message);
-        }
-        self.data
-            .ok_or_else(|| format!("{context} response missing data"))
+    let success = envelope
+        .get("success")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if !success {
+        let message = envelope
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .filter(|message| !message.is_empty())
+            .unwrap_or_else(|| format!("{context} request failed"));
+        return Err(message);
     }
+    let data = envelope
+        .get("data")
+        .ok_or_else(|| format!("{context} response missing data"))?;
+    serde_json::from_value(data.clone())
+        .map_err(|err| format!("Failed to parse {context} response data: {err}"))
 }
+
 
 #[derive(Debug, Deserialize)]
 struct LoginData {
