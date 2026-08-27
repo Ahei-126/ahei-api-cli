@@ -12,7 +12,6 @@ use codex_core::config::Config;
 use codex_http_client::{ClientRouteClass, HttpClient, HttpClientFactory, OutboundProxyPolicy};
 use codex_utils_cli::CliConfigOverrides;
 use serde::Deserialize;
-use serde::DeserializeOwned;
 use serde::Serialize;
 use std::io::{self, Write};
 use toml_edit::value;
@@ -461,7 +460,7 @@ impl NewApiClient {
 }
 
 /// Reads and validates a New API envelope, returning the inner `data`.
-async fn parse_envelope<T: DeserializeOwned>(
+async fn parse_envelope<T: for<'de> Deserialize<'de>>(
     response: codex_http_client::HttpResponse,
     context: &str,
 ) -> Result<T, String> {
