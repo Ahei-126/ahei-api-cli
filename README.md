@@ -1,81 +1,83 @@
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
-</p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
+# AHEIAPI Codex CLI
+
+A branded build of OpenAI's [Codex CLI](https://github.com/openai/codex) that connects directly to the **AHEIAPI** relay through [New API](https://github.com/Calcium-Ion/new-api).
+
+- Default relay: `https://new.ahei.asia`
+- Default product name: `AHEIAPI`
+
+After logging in with your relay account, the CLI can create a new API key or pick an existing one, then write the provider config so `codex` talks to your relay out of the box.
+
+> This is a community / self-hosted build. It is **not** affiliated with OpenAI. Usage with any third-party relay is subject to that provider's terms of service.
 
 ---
 
-## Quickstart
+## Quick start
 
-### Installing and running Codex CLI
+### Download a package
 
-Run the following on Mac or Linux to install Codex CLI:
+Each GitHub Release contains pre-built packages. Pick the one for your platform:
 
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
+| Platform | Archive |
+| --- | --- |
+| Windows x64 | `codex-x86_64-pc-windows-msvc.zip` |
+| macOS Apple Silicon (arm64) | `codex-aarch64-apple-darwin.tar.gz` |
+| macOS Intel (x86_64) | `codex-x86_64-apple-darwin.tar.gz` |
+
+Extract the archive, then rename the binary to `codex` (if needed) and put it on `PATH`.
+
+### Sign in to your relay
+
+Run the binary:
+
+```sh
+codex
 ```
 
-Run the following on Windows to install Codex CLI:
+You will be prompted to:
 
-```shell
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
+1. Enter the relay base URL (default: `https://new.ahei.asia`, omit `/v1`).
+2. Log in with your relay account (username / password).
+3. Create a new API key or select an existing one.
+4. Choose a model id (default: `gpt-4o`).
+
+The CLI writes a provider config on disk so subsequent `codex` runs use your New API key automatically.
+
+---
+
+## Building from source
+
+### Prerequisites
+
+- Rust toolchain (stable). Install via [rustup](https://rustup.rs).
+- Python 3
+- [just](https://github.com/casey/just) (optional but recommended)
+
+### Build
+
+```sh
+cd codex-rs
+just build
 ```
 
-The standalone installers download from `https://releases.openai.com/codex` by default and fall back to GitHub Releases if a metadata or asset download is unavailable. To force GitHub Releases, set `CODEX_INSTALLER_USE_RELEASES_OPENAI_COM` to `false` (`0` and `no` are also accepted):
+To bake in a different relay / product name at build time:
 
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALLER_USE_RELEASES_OPENAI_COM=false sh
+```sh
+NEWAPI_BASE_URL="https://new.ahei.asia" \
+NEWAPI_PRODUCT_NAME="AHEIAPI" \
+just build
 ```
 
-```powershell
-$env:CODEX_INSTALLER_USE_RELEASES_OPENAI_COM='false'; irm https://chatgpt.com/codex/install.ps1 | iex
+### Packaging
+
+The release workflow (`.github/workflows/release-newapi.yml`) builds Windows / macOS archives and publishes a GitHub Release whenever you push a `v*` tag:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
-Codex CLI can also be installed via the following package managers:
+---
 
-```shell
-# Install using npm
-npm install -g @openai/codex
-```
+## License
 
-```shell
-# Install using Homebrew
-brew install --cask codex
-```
-
-Then simply run `codex` to get started.
-
-<details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
-
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
-
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
-
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
-
-</details>
-
-### Using Codex with your ChatGPT plan
-
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Business, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
-
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
-
-## Docs
-
-- [**Codex Documentation**](https://developers.openai.com/codex)
-- [**Contributing**](./docs/contributing.md)
-- [**Installing & building**](./docs/install.md)
-- [**Open source fund**](./docs/open-source-fund.md)
-
-This repository is licensed under the [Apache-2.0 License](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).

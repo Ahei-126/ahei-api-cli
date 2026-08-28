@@ -28,7 +28,7 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             is_windows: false
-          - os: macos-13
+          - os: macos-latest
             target: x86_64-apple-darwin
             is_windows: false
 
@@ -70,3 +70,23 @@ jobs:
           name: codex-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/**
+          generate_release_notes: true
+          name: AHEIAPI Codex CLI ${{ github.ref_name }}
