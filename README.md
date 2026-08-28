@@ -23,24 +23,39 @@ Each GitHub Release contains pre-built packages. Pick the one for your platform:
 | macOS Apple Silicon (arm64) | `codex-aarch64-apple-darwin.tar.gz` |
 | macOS Intel (x86_64) | `codex-x86_64-apple-darwin.tar.gz` |
 
-Extract the archive, then rename the binary to `codex` (if needed) and put it on `PATH`.
+Extract the archive.
 
-### Sign in to your relay
+- **Windows (zip):** the entry point is `bin\codex.exe` inside the folder.
+- **macOS (tar.gz):** `bin/codex` inside the folder (you may need to `chmod +x` or remove the quarantine attribute).
+
+### Sign in to your relay (auto on first run)
 
 Run the binary:
 
 ```sh
-codex
+# Windows (PowerShell, from the folder you extracted)
+.\bin\codex.exe
+
+# macOS
+./bin/codex
 ```
 
-You will be prompted to:
+On its **first run**, this branded build detects that the AHEIAPI relay has not been
+configured yet and launches the relay login automatically. You will be prompted to:
 
-1. Enter the relay base URL (default: `https://new.ahei.asia`, omit `/v1`).
-2. Log in with your relay account (username / password).
-3. Create a new API key or select an existing one.
-4. Choose a model id (default: `gpt-4o`).
+1. Log in with your relay account (username / password).
+2. Create a new API key or select an existing one.
+3. Choose a model id (default: `gpt-4o`).
 
-The CLI writes a provider config on disk so subsequent `codex` runs use your New API key automatically.
+The CLI writes a provider config on disk so subsequent `codex` runs use your New API
+key automatically. The default relay URL is baked in as `https://new.ahei.asia`.
+
+You can also trigger the login manually at any time:
+
+```sh
+.\bin\codex.exe login --newapi          # interactive relay login
+.\bin\codex.exe login --newapi --newapi-with-token   # paste an existing sk-... key
+```
 
 ---
 

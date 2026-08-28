@@ -1145,6 +1145,9 @@ async fn cli_main(
                 }
                 interactive.agents_overview = true;
             }
+            if !open_agents_overview {
+                maybe_auto_newapi_login(&interactive.config_overrides).await?;
+            }
             let exit_info = run_interactive_tui(
                 interactive,
                 root_remote.clone(),
@@ -2572,6 +2575,35 @@ where
 
 fn read_remote_auth_token_from_env_var(env_var_name: &str) -> anyhow::Result<String> {
     read_remote_auth_token_from_env_var_with(env_var_name, |name| std::env::var(name))
+}
+
+/// In branded builds (compiled with `NEWAPI_BASE_URL`), if the New API relay
+/// provider has never been configured, route the first invocation straight into
+/// `codex login --newapi` instead of the upstream OpenAI onboarding. This lets
+/// end users get a working branded build with a single login.
+async fn maybe_auto_newapi_login(
+    config_overrides: &CliConfigOverrides,
+) -> anyhow::Result<()> {
+    if option_env!("NEWAPI_BASE_URL").is_none() {
+        // Non-branded (upstream) build: keep the original onboarding flow.
+        return Ok(());
+    }
+
+    let Ok(config) =
+        cloud_config::load_config(config_overrides, LoaderOverrides::default()).await
+    else {
+        // If the config cannot be loaded, fall through to the normal TUI flow.
+        return Ok(());
+    };
+
+    if config.model_providers.get("newapi").is_some() {
+        // AHEIAPI setup already completed; proceed to the normal TUI.
+        return Ok(());
+    }
+
+    eprintln!("AHEIAPI first run: sign in to your New API relay to continue.");
+    // `run_newapi_login` never returns (it exits on success/failure).
+    run_newapi_login(config_overrides.clone(), None, false).await
 }
 
 async fn run_interactive_tui(
