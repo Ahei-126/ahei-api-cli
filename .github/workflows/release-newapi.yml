@@ -18,6 +18,11 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    env:
+      # github.event.inputs is only populated for workflow_dispatch. On tag
+      # pushes it is empty, so default to the branded relay here.
+      NEWAPI_BASE_URL: ${{ github.event.inputs.newapi_base_url || 'https://new.ahei.asia' }}
+      NEWAPI_PRODUCT_NAME: ${{ github.event.inputs.product_name || 'AHEIAPI' }}
     strategy:
       fail-fast: false
       matrix:
@@ -48,8 +53,8 @@ jobs:
         shell: pwsh
         run: |
           .\scripts\build_cnapi_packages.ps1 `
-            -NewApiBaseUrl "${{ github.event.inputs.newapi_base_url }}" `
-            -ProductName "${{ github.event.inputs.product_name }}" `
+            -NewApiBaseUrl "$env:NEWAPI_BASE_URL" `
+            -ProductName "$env:NEWAPI_PRODUCT_NAME" `
             -Targets ${{ matrix.target }}
 
       - name: Build and archive (macOS)
@@ -57,13 +62,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "event.base=[${{ github.event.inputs.newapi_base_url }}]"
-          echo "event.product=[${{ github.event.inputs.product_name }}]"
-          export NEWAPI_BASE_URL="${{ github.event.inputs.newapi_base_url }}"
-          export NEWAPI_PRODUCT_NAME="${{ github.event.inputs.product_name }}"
-          echo "==> invoking bash wrapper (avoids exec-bit requirement)"
+          echo "base=[$NEWAPI_BASE_URL] product=[$NEWAPI_PRODUCT_NAME]"
           bash ./scripts/build_cnapi_packages.sh "${{ matrix.target }}"
-          echo "==> build_cnapi_packages.sh exited with rc=$?"
 
       - uses: actions/upload-artifact@v4
         with:
