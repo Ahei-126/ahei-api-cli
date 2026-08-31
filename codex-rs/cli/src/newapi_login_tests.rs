@@ -1,7 +1,7 @@
 ﻿use super::*;
 use codex_http_client::HttpClientBuilder;
 use serde_json::json;
-use wiremock::matchers::{header, method, path};
+use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn test_client(base_url: &str) -> NewApiClient {
@@ -52,7 +52,61 @@ async fn login_parses_token_and_user() {
         .await;
 
     let client = test_client(&server.uri());
-    let (token, user_id) = client.login("alice", "secret").await.expect("login");
+    let result = client.login("alice", "secret").await.expect("login");
+    match result {
+        LoginResult::Direct { token, user_id } => {
+            assert_eq!(token, "user-token");
+            assert_eq!(user_id, 42);
+        }
+        _ => panic!("expected direct login"),
+    }
+}
+
+#[tokio::test]
+async fn login_returns_2fa_flow() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/user/login"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true,
+            "message": "请输入两步验证码",
+            "data": {
+                "require_2fa": true,
+                "flow_token": "flow-abc-123",
+                "expires_at": 1893456000
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client.login("alice", "secret").await.expect("login");
+    match result {
+        LoginResult::Need2fa { flow_token } => assert_eq!(flow_token, "flow-abc-123"),
+        _ => panic!("expected 2fa flow"),
+    }
+}
+
+#[tokio::test]
+async fn login_2fa_returns_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/user/login/2fa"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true,
+            "data": {
+                "access_token": "user-token",
+                "user": { "id": 42 }
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let (token, user_id) = client
+        .login_2fa("flow-abc-123", "123456")
+        .await
+        .expect("2fa login");
     assert_eq!(token, "user-token");
     assert_eq!(user_id, 42);
 }
@@ -118,10 +172,32 @@ async fn create_token_returns_key() {
         .and(header("New-Api-User", "7"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "success": true,
+            "message": ""
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/token/search"))
+        .and(query_param("keyword", "codex"))
+        .and(header("Authorization", "Bearer user-token"))
+        .and(header("New-Api-User", "7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true,
             "data": {
-                "key": "sk-new-123456",
-                "id": 9
+                "items": [
+                    { "id": 9, "name": "codex", "key": "sk-new******56" }
+                ]
             }
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/token/9/key"))
+        .and(header("Authorization", "Bearer user-token"))
+        .and(header("New-Api-User", "7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true,
+            "data": { "key": "sk-new-123456" }
         })))
         .mount(&server)
         .await;

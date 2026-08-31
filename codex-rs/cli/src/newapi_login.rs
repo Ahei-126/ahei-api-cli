@@ -51,13 +51,13 @@ pub async fn run_newapi_login(
     let base_url = resolve_base_url(provided_base_url);
     if base_url.is_empty() {
         eprintln!("Error: New API base URL cannot be empty.");
-        std::process::exit(1);
+        { pause_on_exit(); std::process::exit(1); }
     }
     let http = match build_http_client(&base_url) {
         Ok(client) => client,
         Err(err) => {
             eprintln!("Error: {err}");
-            std::process::exit(1);
+            { pause_on_exit(); std::process::exit(1); }
         }
     };
     let client = NewApiClient::new(http, base_url.clone());
@@ -68,7 +68,7 @@ pub async fn run_newapi_login(
         let token = read_line("New API Access Token (sk-...): ");
         if token.trim().is_empty() {
             eprintln!("Error: access token cannot be empty.");
-            std::process::exit(1);
+            { pause_on_exit(); std::process::exit(1); }
         }
         let model = read_line("Model ID (default: gpt-4o): ");
         let model = if model.trim().is_empty() {
@@ -83,19 +83,34 @@ pub async fn run_newapi_login(
     let username = read_line("New API username: ");
     if username.trim().is_empty() {
         eprintln!("Error: username cannot be empty.");
-        std::process::exit(1);
+        { pause_on_exit(); std::process::exit(1); }
     }
     let password = read_line("New API password: ");
     if password.is_empty() {
         eprintln!("Error: password cannot be empty.");
-        std::process::exit(1);
+        { pause_on_exit(); std::process::exit(1); }
     }
 
     let (user_token, user_id) = match client.login(&username, &password).await {
-        Ok(credentials) => credentials,
+        Ok(LoginResult::Direct { token, user_id }) => (token, user_id),
+        Ok(LoginResult::Need2fa { flow_token }) => {
+            eprintln!("This account requires two-factor authentication.");
+            let code = read_line("Two-factor code: ");
+            if code.trim().is_empty() {
+                eprintln!("Error: two-factor code cannot be empty.");
+                { pause_on_exit(); std::process::exit(1); }
+            }
+            match client.login_2fa(&flow_token, code.trim()).await {
+                Ok((token, user_id)) => (token, user_id),
+                Err(err) => {
+                    eprintln!("Error verifying two-factor code: {err}");
+                    { pause_on_exit(); std::process::exit(1); }
+                }
+            }
+        }
         Err(err) => {
             eprintln!("Error logging in: {err}");
-            std::process::exit(1);
+            { pause_on_exit(); std::process::exit(1); }
         }
     };
 
@@ -103,7 +118,7 @@ pub async fn run_newapi_login(
         Ok(tokens) => tokens,
         Err(err) => {
             eprintln!("Error listing tokens: {err}");
-            std::process::exit(1);
+            { pause_on_exit(); std::process::exit(1); }
         }
     };
 
@@ -197,6 +212,20 @@ fn build_http_client(base_url: &str) -> Result<HttpClient, String> {
         .map_err(|err| format!("Failed to build HTTP client: {err}"))
 }
 
+/// Waits for a key press before closing the console when running
+/// interactively, so a double-clicked Windows exe does not vanish on error.
+fn pause_on_exit() {
+    use std::io::IsTerminal;
+    if !io::stdin().is_terminal() {
+        return;
+    }
+    eprintln!();
+    eprint!("Press Enter to close...");
+    let _ = io::stderr().flush();
+    let mut line = String::new();
+    let _ = io::stdin().read_line(&mut line);
+}
+
 /// Reads one trimmed line from stdin, printing the prompt to stderr.
 fn read_line(prompt: &str) -> String {
     eprint!("{prompt}");
@@ -205,7 +234,7 @@ fn read_line(prompt: &str) -> String {
     if io::stdin().read_line(&mut line).is_err() {
         eprintln!();
         eprintln!("Error: failed to read input.");
-        std::process::exit(1);
+        { pause_on_exit(); std::process::exit(1); }
     }
     line.trim().to_string()
 }
@@ -257,13 +286,19 @@ async fn select_or_create_key(
     }
 
     match selection.parse::<usize>() {
-        Ok(index) if index < tokens.len() => match tokens[index].key.as_deref() {
-            Some(key) if !key.is_empty() && !key.contains('*') => key.to_string(),
-            _ => {
-                eprintln!("The selected key was returned masked, so we will create a new one.");
-                create_token_flow(client, user_token, user_id).await
+        Ok(index) if index < tokens.len() => {
+            match client
+                .get_token_key(user_token, user_id, tokens[index].id)
+                .await
+            {
+                Ok(key) => key,
+                Err(err) => {
+                    eprintln!("Error retrieving selected key: {err}");
+                    eprintln!("Creating a new key instead.");
+                    create_token_flow(client, user_token, user_id).await
+                }
             }
-        },
+        }
         _ => {
             eprintln!("Invalid selection; creating a new key instead.");
             create_token_flow(client, user_token, user_id).await
@@ -324,7 +359,7 @@ async fn create_token_flow(client: &NewApiClient, user_token: &str, user_id: u64
         }
         Err(err) => {
             eprintln!("Error creating token: {err}");
-            std::process::exit(1);
+            { pause_on_exit(); std::process::exit(1); }
         }
     }
 }
@@ -335,7 +370,7 @@ async fn write_newapi_config(config: &Config, base_url: &str, token: &str, model
         .with_edits(build_newapi_provider_edits(base_url, token, model));
     if let Err(err) = edits.apply().await {
         eprintln!("Error writing config: {err}");
-        std::process::exit(1);
+        { pause_on_exit(); std::process::exit(1); }
     }
     eprintln!("New API configured successfully (provider: {PROVIDER_ID}).");
     eprintln!("Run `codex` to start using it.");
@@ -398,8 +433,9 @@ impl NewApiClient {
         Self { http, base_url }
     }
 
-    /// POSTs `/api/user/login` and extracts the management token and user id.
-    async fn login(&self, username: &str, password: &str) -> Result<(String, u64), String> {
+    /// POSTs `/api/user/login` and returns either direct credentials or a 2FA
+    /// flow token when the account requires two-factor authentication.
+    async fn login(&self, username: &str, password: &str) -> Result<LoginResult, String> {
         let base_url = &self.base_url;
         let url = format!("{base_url}/api/user/login");
         let response = self
@@ -411,12 +447,45 @@ impl NewApiClient {
             .await
             .map_err(|err| format!("Login request failed ({url}): {err}"))?;
         let data: LoginData = parse_envelope(response, "login").await?;
+        if data.require_2fa.unwrap_or(false) {
+            let flow_token = data
+                .flow_token
+                .ok_or_else(|| "Login response missing 2FA flow token".to_string())?;
+            return Ok(LoginResult::Need2fa { flow_token });
+        }
+        let token = data
+            .token
+            .ok_or_else(|| "Login response missing access token".to_string())?;
         let user_id = data
             .user
             .map(|user| user.id)
             .or(data.id)
             .ok_or_else(|| "Login response missing user id".to_string())?;
-        Ok((data.token, user_id))
+        Ok(LoginResult::Direct { token, user_id })
+    }
+
+    /// Completes a 2FA login with the flow token and the authenticator code.
+    async fn login_2fa(&self, flow_token: &str, code: &str) -> Result<(String, u64), String> {
+        let base_url = &self.base_url;
+        let url = format!("{base_url}/api/user/login/2fa");
+        let response = self
+            .http
+            .post(url.as_str())
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({ "flow_token": flow_token, "code": code }))
+            .send()
+            .await
+            .map_err(|err| format!("2FA login request failed ({url}): {err}"))?;
+        let data: LoginData = parse_envelope(response, "2FA login").await?;
+        let token = data
+            .token
+            .ok_or_else(|| "2FA login response missing access token".to_string())?;
+        let user_id = data
+            .user
+            .map(|user| user.id)
+            .or(data.id)
+            .ok_or_else(|| "2FA login response missing user id".to_string())?;
+        Ok((token, user_id))
     }
 
     /// GETs the token list for the authenticated user.
@@ -435,7 +504,9 @@ impl NewApiClient {
         Ok(data.into_items())
     }
 
-    /// POSTs a new token and returns the full API key.
+    /// POSTs a new token, then resolves the just-created token's id and fetches
+    /// its full key. New API's `AddToken` returns no `data`, so the key must be
+    /// retrieved via `/api/token/{id}/key` afterwards.
     async fn create_token(
         &self,
         user_token: &str,
@@ -443,18 +514,60 @@ impl NewApiClient {
         request: &CreateTokenRequest,
     ) -> Result<String, String> {
         let base_url = &self.base_url;
-        let url = format!("{base_url}/api/token/");
+        let create_url = format!("{base_url}/api/token/");
         let response = self
             .http
-            .post(url.as_str())
+            .post(create_url.as_str())
             .bearer_auth(user_token)
             .header("New-Api-User", user_id.to_string())
             .header("Content-Type", "application/json")
             .json(request)
             .send()
             .await
-            .map_err(|err| format!("Create token request failed ({url}): {err}"))?;
-        let data: CreateTokenData = parse_envelope(response, "create token").await?;
+            .map_err(|err| format!("Create token request failed ({create_url}): {err}"))?;
+        ensure_envelope_success(response, "create token").await?;
+
+        let search_url = format!(
+            "{base_url}/api/token/search?keyword={}&p=1&size=100",
+            encode_url_component(&request.name)
+        );
+        let response = self
+            .http
+            .get(search_url.as_str())
+            .bearer_auth(user_token)
+            .header("New-Api-User", user_id.to_string())
+            .send()
+            .await
+            .map_err(|err| format!("Search token request failed ({search_url}): {err}"))?;
+        let data: TokenListData = parse_envelope(response, "search tokens").await?;
+        let token = data
+            .into_items()
+            .into_iter()
+            .filter(|token| token.name == request.name)
+            .max_by_key(|token| token.id)
+            .ok_or_else(|| format!("Created token '{}' not found in token list", request.name))?;
+
+        self.get_token_key(user_token, user_id, token.id).await
+    }
+
+    /// POSTs `/api/token/{id}/key` and returns the full plaintext API key.
+    async fn get_token_key(
+        &self,
+        user_token: &str,
+        user_id: u64,
+        token_id: u64,
+    ) -> Result<String, String> {
+        let base_url = &self.base_url;
+        let url = format!("{base_url}/api/token/{token_id}/key");
+        let response = self
+            .http
+            .post(url.as_str())
+            .bearer_auth(user_token)
+            .header("New-Api-User", user_id.to_string())
+            .send()
+            .await
+            .map_err(|err| format!("Get token key request failed ({url}): {err}"))?;
+        let data: TokenKeyData = parse_envelope(response, "get token key").await?;
         Ok(data.key)
     }
 }
@@ -498,15 +611,78 @@ async fn parse_envelope<T: for<'de> Deserialize<'de>>(
         .map_err(|err| format!("Failed to parse {context} response data: {err}"))
 }
 
+/// Validates that a New API envelope reports success, allowing responses that
+/// carry no `data` (such as `CreateToken`).
+async fn ensure_envelope_success(
+    response: codex_http_client::HttpResponse,
+    context: &str,
+) -> Result<(), String> {
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "{context} request failed (HTTP {}): {body}",
+            status.as_u16()
+        ));
+    }
+    let body = response
+        .text()
+        .await
+        .map_err(|err| format!("Failed to read {context} response: {err}"))?;
+    let envelope: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|err| format!("Failed to parse {context} response: {err}"))?;
+    let success = envelope
+        .get("success")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if !success {
+        let message = envelope
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .filter(|message| !message.is_empty())
+            .unwrap_or_else(|| format!("{context} request failed"));
+        return Err(message);
+    }
+    Ok(())
+}
+
+/// Percent-encodes a string for use as a URL query component.
+fn encode_url_component(raw: &str) -> String {
+    let mut out = String::new();
+    for byte in raw.as_bytes() {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char);
+            }
+            _ => {
+                out.push('%');
+                out.push_str(&format!("{byte:02X}"));
+            }
+        }
+    }
+    out
+}
+
 
 #[derive(Debug, Deserialize)]
 struct LoginData {
     #[serde(alias = "access_token")]
-    token: String,
+    token: Option<String>,
     #[serde(default)]
     user: Option<LoginUser>,
     #[serde(default)]
     id: Option<u64>,
+    #[serde(default)]
+    require_2fa: Option<bool>,
+    #[serde(default)]
+    flow_token: Option<String>,
+}
+
+#[derive(Debug)]
+enum LoginResult {
+    Direct { token: String, user_id: u64 },
+    Need2fa { flow_token: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -551,11 +727,8 @@ struct NewApiToken {
 }
 
 #[derive(Debug, Deserialize)]
-struct CreateTokenData {
+struct TokenKeyData {
     key: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    id: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
