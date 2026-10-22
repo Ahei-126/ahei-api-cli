@@ -65,7 +65,7 @@ jobs:
           echo "base=[$NEWAPI_BASE_URL] product=[$NEWAPI_PRODUCT_NAME]"
           bash ./scripts/build_cnapi_packages.sh "${{ matrix.target }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: codex-${{ matrix.target }}
           path: dist/*
